@@ -11,14 +11,6 @@ import (
 	"strconv"
 )
 
-// CLARIFIER ON BINARY.WRITE AND CONN.WRITE FROM DISCUSSION:
-// Theoretically you can swap out our binary.write and conn.write calls and still get the client-server interaction to work. But there are trade offs:
-// binary.write allows you to quickly and cleanly send non-slice data over the wire without having to convert it to a slice. For instance, if I was to replicate
-// err = binary.Write(conn, binary.BigEndian, uint32(len(filenameBytes))) using conn.Write it would look like _, err = conn.Write([]byte{byte(len(filenameBytes) >> 24), byte(len(filenameBytes) >> 16), byte(len(filenameBytes) >> 8), byte(len(filenameBytes))})
-// However, with conn.Write you do get feedback from the function on how many bytes you actually were able to send, which based on the network we can't guarantee all the time.
-// If at bytesWritten, err := conn.Write(buffer[:bytesRead]) we chose to use binary.Write, which does NOT provide such feedback, it leads to the possibility our count of the bytes written could be wrong.
-
-
 var serverAddr string
 
 func main() {
@@ -30,7 +22,7 @@ func main() {
 	//localhost also OK
 	//TODO 1: set up a string flag named "host" with a default value of 127.0.0.1 (localhost is also OK).
 	// Include a brief description of its usage in the usage argument.
-	host := ????
+	host := flag.String("host", "127.0.0.1", "Host to bind to")
 
 	// Parse flags first
 	flag.Parse()
@@ -77,8 +69,8 @@ func main() {
 func runServer() {
 	// Starts a TCP server listening on serverAddr
 	// TODO 2: as written above. Make sure both listener, and err variables are correctly defined so the rest of the code doesn't throw errors.
-	// serverAddr was already defined in main, and we will use TCP and net.Listen for this.
-	listener, err := ???
+	// serverAddr was already defined in main, and we will use TCP for this.
+	listener, err := net.Listen("tcp", serverAddr)
 	if err != nil {
 		fmt.Printf("Failed to start server: %v\n", err)
 		os.Exit(1)
@@ -97,99 +89,98 @@ func runServer() {
 
 		fmt.Printf("New connection from %s\n", conn.RemoteAddr())
 
-		// TODO 9: uncomment this and lines 98-184 before writing handleConnection. 
-		// You can also test client and server now if you wish while handleConnection doesn't have any real definition to ensure clients/server can connect with each other.
-		// go handleConnection(conn) // Handle each connection in a separate goroutine
+		// TODO 9: uncomment this before writing handleConnection
+		go handleConnection(conn) // Handle each connection in a separate goroutine
 	}
 }
 
-// func handleConnection(conn net.Conn) {
-// 	defer conn.Close()
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
 
-// 	// Reads the length of the incoming filename (4 bytes, big-endian)
-// 	var filenameLen uint32
-// 	err := binary.Read(conn, binary.BigEndian, &filenameLen)
-// 	if err != nil {
-// 		fmt.Printf("Failed to read filename length: %v\n", err)
-// 		return
-// 	}
+	// Reads the length of the incoming filename (4 bytes, big-endian)
+	var filenameLen uint32
+	err := binary.Read(conn, binary.BigEndian, &filenameLen)
+	if err != nil {
+		fmt.Printf("Failed to read filename length: %v\n", err)
+		return
+	}
 
-// 	// Reads the filename based on the length
-// 	filenameBytes := make([]byte, filenameLen)
-// 	_, err = io.ReadFull(conn, filenameBytes)
-// 	if err != nil {
-// 		fmt.Printf("Failed to read filename: %v\n", err)
-// 		return
-// 	}
-// 	filename := string(filenameBytes)
+	// Reads the filename based on the length
+	filenameBytes := make([]byte, filenameLen)
+	_, err = io.ReadFull(conn, filenameBytes)
+	if err != nil {
+		fmt.Printf("Failed to read filename: %v\n", err)
+		return
+	}
+	filename := string(filenameBytes)
 
-// 	// Ensure only the base name is used (avoid writing files to unexpected directories)
-// 	filename = filepath.Base(filename)
+	// Ensure only the base name is used (avoid writing files to unexpected directories)
+	filename = filepath.Base(filename)
 
-// 	// Read the length of the incoming content (4 bytes, big-endian)
-// 	var contentLen uint32
-// 	// TODO 10: use binary.Read to proprely define contentLen.
-// 	// We are using binary.BigEndian for this, as well as the connection defined as "conn"
-// 	// make sure err is defined as well. Line 102 is your friend here.
-// 	err = ???
-// 	if err != nil {
-// 		fmt.Printf("Failed to read content length: %v\n", err)
-// 		return
-// 	}
+	// Read the length of the incoming content (4 bytes, big-endian)
+	var contentLen uint32
+	// TODO 10: use binary.Read to proprely define contentLen.
+	// We are using binary.BigEndian for this, as well as the connection defined as "conn"
+	// make sure err is defined as well.
+	err = binary.Read(conn, binary.BigEndian, &contentLen)
+	if err != nil {
+		fmt.Printf("Failed to read content length: %v\n", err)
+		return
+	}
 
-// 	fmt.Printf("Receiving file: %s (%d bytes)\n", filename, contentLen)
+	fmt.Printf("Receiving file: %s (%d bytes)\n", filename, contentLen)
 
-// 	// Ensures a "server-storage" directory exists, or creates one if missing.
-// 	sStorageDir := "server-storage"
-// 	err = os.MkdirAll(sStorageDir, 0755)
-// 	if err != nil {
-// 		fmt.Printf("Failed to create server storage directory: %v\n", err)
-// 		return
-// 	}
+	// Ensures a "server-storage" directory exists, or creates one if missing.
+	sStorageDir := "server-storage"
+	err = os.MkdirAll(sStorageDir, 0755)
+	if err != nil {
+		fmt.Printf("Failed to create server storage directory: %v\n", err)
+		return
+	}
 
-// 	// Creates a new file in the "downloads" directory with the received name
-// 	filename = filepath.Join(sStorageDir, filename)
-// 	file, err := os.Create(filename)
-// 	if err != nil {
-// 		fmt.Printf("Failed to create file: %v\n", err)
-// 		return
-// 	}
-// 	defer file.Close()
+	// Creates a new file in the "downloads" directory with the received name
+	filename = filepath.Join(sStorageDir, filename)
+	file, err := os.Create(filename)
+	if err != nil {
+		fmt.Printf("Failed to create file: %v\n", err)
+		return
+	}
+	defer file.Close()
 
-// 	// Reads the file content in chunks and write it to the file
-// 	buffer := make([]byte, 4096)
-// 	var totalRead uint32 = 0
+	// Reads the file content in chunks and write it to the file
+	buffer := make([]byte, 4096)
+	var totalRead uint32 = 0
 
-// 	// TODO 11: what should this for loop be?
-// 	for ??? {
-// 		readSize := uint32(len(buffer))
+	// TODO 11: what should this for loop be?
+	for totalRead < contentLen {
+		readSize := uint32(len(buffer))
 
-// 		//adjusts buffer size if the remaining # of bytes is less than 4096
-// 		if contentLen-totalRead < readSize {
-// 			readSize = contentLen - totalRead
-// 		}
+		//adjusts buffer size if the remaining # of bytes is less than 4096
+		if contentLen-totalRead < readSize {
+			readSize = contentLen - totalRead
+		}
 
-// 		//TODO 12: use io.ReadFull to read from connection into our buffer (note readSize gives us an idea of up to how many bytes we can read)
-// 		// line 110 is your friend here.
-// 		bytesRead, err := ???
-// 		if err != nil {
-// 			fmt.Printf("Failed to read content: %v\n", err)
-// 			return
-// 		}
+		//TODO 12: use io.ReadFull to read into our buffer (note readSize gives us an idea of up to how many bytes we can read)
+		bytesRead, err := io.ReadFull(conn, buffer[:readSize])
+		if err != nil {
+			fmt.Printf("Failed to read content: %v\n", err)
+			return
+		}
 
-// 		// LAST STEP: write bytes from buffer into the output file
-// 		_, err = file.Write(buffer[:bytesRead])
-// 		if err != nil {
-// 			fmt.Printf("Failed to write to file: %v\n", err)
-// 			return
-// 		}
+		// TODO 13: use Golang file io to write contents from the buffer into the resulting file (variable name is "file")
+		// we will not use the int return value for anything in this sample code, you may blank it out if you wish.
+		_, err = file.Write(buffer[:bytesRead])
+		if err != nil {
+			fmt.Printf("Failed to write to file: %v\n", err)
+			return
+		}
 
-// 		totalRead += uint32(bytesRead)
-// 		fmt.Printf("\rProgress: %.2f%%", float64(totalRead)/float64(contentLen)*100)
-// 	}
+		totalRead += uint32(bytesRead)
+		fmt.Printf("\rProgress: %.2f%%", float64(totalRead)/float64(contentLen)*100)
+	}
 
-// 	fmt.Println("\nFile received successfully")
-// }
+	fmt.Println("\nFile received successfully")
+}
 
 func runClient(filename string) {
 	// TODO 3: read through the commments to understand whats happening
@@ -206,9 +197,9 @@ func runClient(filename string) {
 	baseFilename := filepath.Base(filename)
 	filenameBytes := []byte(baseFilename)
 
-	// Connect to the server using net.Dial
+	// Connect to the server
 	// TODO 4: as written above. Again, we are using tcp and serverAddr was defined already.
-	conn, err := ?????
+	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		fmt.Printf("Failed to connect to server: %v\n", err)
 		os.Exit(1)
@@ -236,11 +227,11 @@ func runClient(filename string) {
 		os.Exit(1)
 	}
 
-	// Send the file size as a 4 byte integer
+	// Send the content length as a 4 byte integer
 	contentLen := uint32(fileInfo.Size())
-	// TODO 5: send the file size data over the connection, make sure err is defined.
-	// we will use binary.BigEndian for everything. Line 209 is your friend here.
-	err = ???
+	// TODO 5: send the content length data over the connection, make sure err is defined.
+	// we will use binary.BigEndian for everything
+	err = binary.Write(conn, binary.BigEndian, contentLen)
 	if err != nil {
 		fmt.Printf("Failed to send content length: %v\n", err)
 		os.Exit(1)
@@ -250,13 +241,13 @@ func runClient(filename string) {
 
 	// Send the file contents in chunks
 	// TODO 6: Create a byte/uint8-based buffer with a large enough size (4096 recommended)
-	buffer := ???
+	buffer := make([]byte, 4096)
 	var totalSent uint32 = 0
 
 	for totalSent < contentLen {
 		// TODO 7: read bytes from the file (variable name is also "file") into the buffer created in TODO 6.
 		// make sure bytesRead and err are defined
-		bytesRead, err := ???
+		bytesRead, err := file.Read(buffer)
 		if err != nil && err != io.EOF {
 			fmt.Printf("Failed to read from file: %v\n", err)
 			os.Exit(1)
@@ -267,8 +258,8 @@ func runClient(filename string) {
 		}
 
 		// TODO 8: read bytes from the buffer (limit yourself to bytesRead # of bytes) and write them to the connection.
-		// you must define bytesWritten and err for things to work. Line 215 is your friend here.
-		bytesWritten, err := ???
+		// you must define bytesWritten and err for things to work.
+		bytesWritten, err := conn.Write(buffer[:bytesRead])
 		if err != nil {
 			fmt.Printf("Failed to send data: %v\n", err)
 			os.Exit(1)
